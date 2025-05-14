@@ -18,7 +18,7 @@ class Yako {
     static Injector => A_LineFile . "\..\injector.dll"
 
     /** File path to `windowProc.dll` */
-    static WindowProc => A_LineFile . "/../windowProc.dll"
+    static WindowProc => A_LineFile . "\..\windowProc.dll"
 
     /** Message number used for callbacks to the AHK script */
     static MsgNumber => 0x3CCC
@@ -140,6 +140,7 @@ class Yako {
     __Delete() {
         DllCall("CloseHandle", "Ptr", this.Process)
         ; TODO need to free the old subclass procedure when AHK quits
+        ;      probably create `__declspec(dllexport) void free()` function
     }
 
     ReadObject(StructClass, Ptr) {
@@ -176,6 +177,20 @@ class YakoGui extends Yako {
     ; TODO just loop through these and "inject" a `GetMethod()` check
     ;      to save space?
     ;      do the same with "return this"?
+
+    /**
+     * Sent when the window is being destroyed.
+     * @example
+     * 
+     * MyGui.Destroy((this) {
+     *     MsgBox("quitting...")
+     *     SetTimer(() => ExitApp(), -500)
+     *     return 0
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
     Destroy(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_DESTROY := 0x0002, (GuiObj, wParam, lParam) {
@@ -184,6 +199,18 @@ class YakoGui extends Yako {
         return this
     }
 
+    /**
+     * Sent when the window is being moved.
+     * @example
+     * 
+     * MyGui.Move((this, x, y) {
+     *     ToolTip("position: " . x . " " . y)
+     *     return this.DoDefault
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
     Move(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_MOVE := 0x0003, (GuiObj, wParam, lParam) {
@@ -192,6 +219,18 @@ class YakoGui extends Yako {
         return this
     }
 
+    /**
+     * Sent when the size of the window is being changed.
+     * @example
+     * 
+     * MyGui.Size((this, Width, Height) {
+     *     ToolTip("size: " . Width . " " . Height)
+     *     return this.DoDefault
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
     Size(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_SIZE := 0x0005, (GuiObj, wParam, lParam) {
@@ -200,12 +239,44 @@ class YakoGui extends Yako {
         return this
     }
 
+    ; TODO split into de/activate?
+    /**
+     * Sent when the window receives keyboard focus.
+     * @example
+     * 
+     * MyGui.Activate((this, OtherHwnd, Clicked) {
+     *     ToolTip((Clicked) ? "activated (click)." : "activated.")
+     *     return this.DoDefault
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
     Activate(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_ACTIVATE := 0x0006, (GuiObj, wParam, lParam) {
-            return Callback(GuiObj, wParam, lParam)
+            if (!wParam) {
+                return GuiObj.DoDefault
+            }
+            return Callback(GuiObj, lParam, wParam == 2)
         })
         return this
+    }
+
+    ; TODO split this?
+    /**
+     * Sent when the window loses keyboard focus.
+     * @example
+     * 
+     * MyGui.Deactivate((this, OtherHwnd) {
+     *     ToolTip("deactivated. new window: " . OtherHwnd)
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
+    Deactivate(Callback) {
+
     }
 
     Focus(Callback) {
@@ -234,7 +305,7 @@ class YakoGui extends Yako {
 
     SetRedraw(Callback) {
         GetMethod(Callback)
-        this.OnMessage(WM_SETREDRAW, (GuiObj, wParam, lParam) {
+        this.OnMessage(WM_SETREDRAW := 0x000B, (GuiObj, wParam, lParam) {
             return Callback(GuiObj, wParam)
         })
         return this
@@ -243,7 +314,7 @@ class YakoGui extends Yako {
     SetText(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_SETTEXT := 0x000C, (GuiObj, wParam, lParam) {
-            return Callback
+            
         })
         return this
     }
@@ -259,7 +330,10 @@ class YakoGui extends Yako {
 }
 
 Notepad := YakoGui.FromWindow("ahk_exe notepad.exe")
-Notepad.Size((*) => "")
+Notepad.Activate((this, OtherHwnd, Clicked) {
+    ToolTip(Clicked)
+    return this.DoDefault
+})
 
 ^space:: {
 
