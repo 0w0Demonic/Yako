@@ -1,29 +1,40 @@
-// https://www.github.com/0w0Demonic/Tanuki
-// - windowProc2.c
+//   _ 
+//  ´ `     ,_~*- /                     
+//     \  ,´_,   /        _,            
+//      l´ (_|, /__   .*´  l\  _@&^""-._
+//     /      `/\  (o)      `*$m^       
+// <__´          \                      
+// 
+// https://www.github.com/0w0Demonic/Yako
+// - windowProc.c
+
 #include <windows.h>
 #include <stdio.h>
 #include <commctrl.h>
 
-#define WM_TANUKIMESSAGE 0x3CCC // message number of our callbacks
+// message number of our callbacks
+#define WM_YAKOMESSAGE 0x3CCC 
 
-HWND g_hAhkScript = NULL; // handle of the AHK script
-HWND g_hTarget = NULL; // handle of our target to subclass
-HMODULE g_hModule = NULL; // handle of this DLL
+HWND g_hAhkScript = NULL;    // handle of the AHK script
+HWND g_hTarget = NULL;       // handle of our target to subclass
+HMODULE g_hModule = NULL;    // handle of this DLL
 HANDLE g_hAhkProcess = NULL; // process handle of AHK script
-void* g_pRemote = NULL; // pointer to external buffer for TanukiMessage
+void* g_pRemote = NULL;      // external buffer that fits one YakoMessage struct
 
+// holds data for init()
 typedef struct {
     HWND hTarget;
     HWND hAhkScript;
 } InitData;
 
+// message that we pass around between the window and AHK script
 typedef struct {
-    UINT msg;
-    WPARAM wParam;
-    LPARAM lParam;
-    LRESULT lResult;
-    BOOL handled;
-} TanukiMessage, *lpTanukiMessage;
+    UINT msg;        // message number
+    WPARAM wParam;   // wParam
+    LPARAM lParam;   // lParam
+    LRESULT lResult; // the result we give back from inside AHK
+    BOOL handled;    // whether the message should be deferred to the next proc
+} YakoMessage, *lpYakoMessage;
 
 BOOL APIENTRY DllMain(
         HMODULE hModule, DWORD reason,
@@ -71,9 +82,9 @@ LRESULT CALLBACK SubclassProc(
         g_hAhkProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, ahkPID);
     }
 
-    // allocate memory inside AHK script large enough to hold one TanukiMessage
+    // allocate memory inside AHK script large enough to hold one YakoMessage
     if (!g_pRemote) {
-        g_pRemote = VirtualAllocEx(g_hAhkProcess, NULL, sizeof(TanukiMessage),
+        g_pRemote = VirtualAllocEx(g_hAhkProcess, NULL, sizeof(YakoMessage),
                         MEM_COMMIT, PAGE_READWRITE);
     }
 
@@ -86,22 +97,24 @@ LRESULT CALLBACK SubclassProc(
     }
     
     // WPARAM - HWND
-    // LPARAM - TanukiMessage*
-    TanukiMessage m = { uMsg, wParam, lParam, 0, FALSE };
-    WriteProcessMemory(g_hAhkProcess, g_pRemote, &m, sizeof(TanukiMessage), NULL);
-    SendMessage(g_hAhkScript, WM_TANUKIMESSAGE, (WPARAM)hwnd, (LPARAM)g_pRemote);
-    ReadProcessMemory(g_hAhkProcess, g_pRemote, &m, sizeof(TanukiMessage), NULL);
+    // LPARAM - YakoMessage*
+    YakoMessage m = { uMsg, wParam, lParam, 0, FALSE };
+    WriteProcessMemory(g_hAhkProcess, g_pRemote, &m, sizeof(YakoMessage), NULL);
+    SendMessage(g_hAhkScript, WM_YAKOMESSAGE, (WPARAM)hwnd, (LPARAM)g_pRemote);
+    ReadProcessMemory(g_hAhkProcess, g_pRemote, &m, sizeof(YakoMessage), NULL);
 
     // return LRESULT of message if handled, otherwise call next proc
     return (m.handled) ? m.lResult
                        : DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
+// the hook procedure which we use to set the subclass of the window
 LRESULT CALLBACK WndHook(int nCode, WPARAM wParam, LPARAM lParam)
 {
     if (nCode >= 0) {
         CWPSTRUCT *cwp = (CWPSTRUCT*)lParam;
 
+        // TODO do I `UnhookWindowsHookEx()` directly after this?
         if (cwp->hwnd == g_hTarget) {
             SetWindowSubclass(cwp->hwnd, SubclassProc, 0, 0);
         }
@@ -109,6 +122,7 @@ LRESULT CALLBACK WndHook(int nCode, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
+// entry point for the thread that creates a hook procedure for the window
 DWORD WINAPI HookThread(LPVOID lpParam) {
     DWORD targetThreadId = (DWORD)(uintptr_t)lpParam;
 
@@ -129,6 +143,9 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     return 0;
 }
 
+// initializes the subclass procedure. To be able to inject the subclass proc,
+// we must call `SetWindowSubclass()` from both the same thread and the same
+// process. For that, we use a hook procedure (`SetWindowsHookEx()`).
 __declspec(dllexport)
 void init(InitData *data)
 {

@@ -1,9 +1,17 @@
-// https://www.github.com/0w0Demonic/Tanuki
-// - injector2.c
+//   _                                  
+//  ´ `     ,_~*- /                     
+//     \  ,´_,   /        _,            
+//      l´ (_|, /__   .*´  l\  _@&^""-._
+//     /      `/\  (o)      `*$m^       
+// <__´          \                      
+// 
+// https://www.github.com/0w0Demonic/Yako
+// - injector.c
 
 #include <windows.h>
 #include <stdio.h>
 
+// return values
 #define INJECT_SUCCESS           0
 #define INJECT_ERR_OPENPROCESS   1
 #define INJECT_ERR_ALLOC         2
@@ -12,19 +20,13 @@
 #define INJECT_ERR_DLL_NOT_FOUND 5
 #define INJECT_ERR_GETPROC       6
 
+// struct that we need for `windowProc\init()`
 typedef struct {
     HWND hTarget;
     HWND hAhkScript;
 } InitData;
 
-typedef struct {
-    UINT msg;
-    WPARAM wParam;
-    LPARAM lParam;
-    LRESULT lResult;
-    BOOL handled;
-} TanukiMessage, *lpTanukiMessage;
-
+// calls a function from an external process
 BOOL callRemote(HANDLE hProcess, FARPROC fn, void* hData, size_t reqSize)
 {
     BOOL success = FALSE;
@@ -47,9 +49,16 @@ BOOL callRemote(HANDLE hProcess, FARPROC fn, void* hData, size_t reqSize)
     return success;
 }
 
+// injects the given window with a new subclass procedure, forwarding each
+// message to an AutoHotkey script for handling messages.
+// 
+// hTarget    - the target window
+// hAhkScript - AutoHotkey script to forward messages to
+// dllPath    - file path to `windowProc.dll`
 __declspec(dllexport)
 int inject(HWND hTarget, HWND hAhkScript, LPWSTR dllPath)
 {
+    // open process of target window
     DWORD targetPID;
     GetWindowThreadProcessId(hTarget, &targetPID);
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, targetPID);
@@ -57,18 +66,21 @@ int inject(HWND hTarget, HWND hAhkScript, LPWSTR dllPath)
         return INJECT_ERR_OPENPROCESS;
     }
 
+    // load library from the external process
     size_t dllSize = (wcslen(dllPath) + 1) * sizeof(WCHAR);
     if (!callRemote(hProcess, (FARPROC)LoadLibraryW, dllPath, dllSize)) {
         CloseHandle(hProcess);
         return INJECT_ERR_THREAD;
     }
 
+    // load windowProc.dll locally
     HMODULE hLocalDll = LoadLibraryW(dllPath);
     if (!hLocalDll) {
         CloseHandle(hProcess);
         return INJECT_ERR_DLL_NOT_FOUND;
     }
 
+    // get entry point of windowProc.dll/init()
     FARPROC InitProc = GetProcAddress(hLocalDll, "init");
     if (!InitProc) {
         FreeLibrary(hLocalDll);
@@ -76,6 +88,7 @@ int inject(HWND hTarget, HWND hAhkScript, LPWSTR dllPath)
         return INJECT_ERR_GETPROC;
     }
 
+    // call windowProc.dll/init() from external thread
     InitData data = { hTarget, hAhkScript };
     BOOL ok = callRemote(hProcess, InitProc, &data, sizeof(InitData));
     FreeLibrary(hLocalDll);

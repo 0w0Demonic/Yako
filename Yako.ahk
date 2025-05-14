@@ -1,10 +1,10 @@
 /**
  * ```
- *   _ 
+ *   _
  *  ´ `     ,_~*- /
  *     \  ,´_,   /        _,
  *      l´ (_|, /__   .*´  l\  _@&^""-._
- *     /      `/\  (o)      `*$m^               
+ *     /      `/\  (o)      `*$m^
  * <__´          \
  * ```
  * https://www.github.com/0w0Demonic/Yako
@@ -174,18 +174,13 @@ class RECT {
  * ```
  */
 class YakoGui extends Yako {
-    ; TODO just loop through these and "inject" a `GetMethod()` check
-    ;      to save space?
-    ;      do the same with "return this"?
-
     /**
-     * Sent when the window is being destroyed.
-     * @example
+     * Sent when the window is being destroyed. This message always returns
+     * calls the next subclass procedure to ensure proper cleanup.
      * 
+     * @example
      * MyGui.Destroy((this) {
      *     MsgBox("quitting...")
-     *     SetTimer(() => ExitApp(), -500)
-     *     return 0
      * })
      * 
      * @param   {Func}  Callback  the function to be called
@@ -194,18 +189,25 @@ class YakoGui extends Yako {
     Destroy(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_DESTROY := 0x0002, (GuiObj, wParam, lParam) {
-            return Callback(GuiObj)
+            Callback(GuiObj)
+            return GuiObj.DoDefault
         })
         return this
     }
 
     /**
-     * Sent when the window is being moved.
-     * @example
+     * Sent after a window has been moved. If this function handles the
+     * message, it should return zero.
      * 
+     * - x : x-coordinate of the upper left corner of client area
+     * - y : y-coordinate of the upper left corner of client area
+     * - Return : `0` or `DoDefault`
+     * 
+     * TODO WM_WINDOWPOSCHANGING?
+     * 
+     * @example
      * MyGui.Move((this, x, y) {
      *     ToolTip("position: " . x . " " . y)
-     *     return this.DoDefault
      * })
      * 
      * @param   {Func}  Callback  the function to be called
@@ -220,10 +222,23 @@ class YakoGui extends Yako {
     }
 
     /**
-     * Sent when the size of the window is being changed.
-     * @example
+     * Sent to a window after its size has changed. If the function handles
+     * this message, it should return zero.
      * 
-     * MyGui.Size((this, Width, Height) {
+     * - Width : width of the client area
+     * - Height : height of the client area
+     * - Return : type of risizing requested (see WM_SIZE)
+     * 
+     * - return value : `0` or `DoDefault`
+     * 
+     * @example
+     * MyGui.Size((this, Width, Height, ResizingType) {
+     *     static Restored  := 0
+     *     static Minimized := 1
+     *     static Maximized := 2
+     *     static MaxShow   := 3
+     *     static MaxHide   := 4
+     * 
      *     ToolTip("size: " . Width . " " . Height)
      *     return this.DoDefault
      * })
@@ -241,12 +256,15 @@ class YakoGui extends Yako {
 
     ; TODO split into de/activate?
     /**
-     * Sent when the window receives keyboard focus.
-     * @example
+     * Sent when the window is being activated.
      * 
-     * MyGui.Activate((this, OtherHwnd, Clicked) {
-     *     ToolTip((Clicked) ? "activated (click)." : "activated.")
-     *     return this.DoDefault
+     * - PreviousHwnd : the window which was deactivated
+     * - WasClicked : whether the window was activated by mouse click
+     * - Return : `0` or `DoDefault`
+     * 
+     * @example
+     * MyGui.Activate((this, PreviousHwnd, WasClicked) {
+     *     ToolTip((WasClicked) ? "activated (click)." : "activated.")
      * })
      * 
      * @param   {Func}  Callback  the function to be called
@@ -255,30 +273,52 @@ class YakoGui extends Yako {
     Activate(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_ACTIVATE := 0x0006, (GuiObj, wParam, lParam) {
-            if (!wParam) {
-                return GuiObj.DoDefault
+            if (wParam) {
+                Callback(GuiObj, lParam, wParam == 2)
             }
-            return Callback(GuiObj, lParam, wParam == 2)
+            return GuiObj.DoDefault
         })
         return this
     }
 
-    ; TODO split this?
     /**
-     * Sent when the window loses keyboard focus.
-     * @example
+     * Sent when the window is being deactivated.
      * 
-     * MyGui.Deactivate((this, OtherHwnd) {
-     *     ToolTip("deactivated. new window: " . OtherHwnd)
+     * - NewHwnd : the window which was activated
+     * - Return `0` or `DoDefault`
+     * 
+     * @example
+     * MyGui.Deactivate((this, NewHwnd) {
+     *     ToolTip("deactivated. new window: " . NewHwnd)
      * })
      * 
      * @param   {Func}  Callback  the function to be called
      * @return  {this}
      */
     Deactivate(Callback) {
-
+        GetMethod(Callback)
+        this.OnMessage(WM_ACTIVATE := 0x0006, (GuiObj, wParam, lParam) {
+            if (!wParam) {
+                Callback(GuiObj, lParam)
+            }
+            return GuiObj.DoDefault
+        })
     }
 
+    /**
+     * Sent to the window after gaining keyboard focus.
+     * 
+     * - PreviousHwnd : the window which los keyboard focus
+     * - Return : `0` or `DoDefault`
+     * 
+     * @example
+     * MyGui.Focus((this, PreviousHwnd) {
+     *     ToolTip("gained keyboard control...")
+     * })
+     * 
+     * @param   {Func}  Callback  the function to be called
+     * @return  {this}
+     */
     Focus(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_SETFOCUS := 0x0007, (GuiObj, wParam, lParam) {
@@ -311,6 +351,8 @@ class YakoGui extends Yako {
         return this
     }
 
+    ; NOTE we should be fine here. This is a system message and therefore
+    ;      the string buffer is marshalled
     SetText(Callback) {
         GetMethod(Callback)
         this.OnMessage(WM_SETTEXT := 0x000C, (GuiObj, wParam, lParam) {
@@ -330,9 +372,10 @@ class YakoGui extends Yako {
 }
 
 Notepad := YakoGui.FromWindow("ahk_exe notepad.exe")
-Notepad.Activate((this, OtherHwnd, Clicked) {
-    ToolTip(Clicked)
-    return this.DoDefault
+
+Notepad.Move((this, x, y) {
+    ToolTip(x " " y)
+    return 0
 })
 
 ^space:: {
