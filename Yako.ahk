@@ -1,3 +1,4 @@
+#Requires AutoHotkey >=v2.1-alpha.9
 /**
  * ```
  *   _
@@ -12,30 +13,69 @@
  * Yako is an AutoHotkey library that uses DLL injection to intercept window
  * messages in external applications, allowing you to modify and reprogram
  * their behavior.
+ * 
+ * ### How Does it Work?
+ * 
+ * ### How to Use
+ * 
+ * ...
+ * 
+ * ```
+ * Notepad := YakoGui.FromWindow("ahk_exe notepad.exe")
+ * 
+ * ; catch all `WM_SIZE` messages
+ * Notepad.Size((this, Width, Height) {
+ *     ToolTip("size: " . x . " Width " . Height)
+ * })
+ * ```
  */
 class Yako {
-    /** File path to `injector.dll` */
+    /**
+     * Returns the file path to `injector.dll`.
+     */
     static Injector => A_LineFile . "\..\injector.dll"
 
-    /** File path to `windowProc.dll` */
+    /**
+     * Returns the file path to `windowProc.dll`
+     */
     static WindowProc => A_LineFile . "\..\windowProc.dll"
 
-    /** Message number used for callbacks to the AHK script */
+    /**
+     * Message number that is sent to the AHK script.
+     */
     static MsgNumber => 0x3CCC
 
-    /** Creates a new window hook from the given GUI control */
+    /**
+     * Message used for unsubclassing the window.
+     */
+    static FreeMsg => 0x4CCC
+
+    /**
+     * Creates a new window hook from the given Control parameter.
+     */
     static FromControl(Ctl, WTtl?, WTxt?, ETtl?, ETxt?) {
         Hwnd := ControlGetHwnd(Ctl, WTtl?, WTxt?, ETtl?, ETxt?)
         return this(Hwnd)
     }
 
-    /** Creates a new window hook from the given application */
+    /**
+     * Creates a new window hook from the given WinTitle parameter.
+     */
     static FromWindow(WTtl?, WTxt?, ETtl?, ETxt?) {
         Hwnd := WinGetId(WTtl?, WTxt?, ETtl?, ETxt?)
         return this(Hwnd)
     }
 
-    /** Creates a new window hook from the given HWND */
+    /**
+     * Creates a new window hook from the given Hwnd.
+     */
+    static FromHwnd(Hwnd) {
+        return this(Hwnd)
+    }
+
+    /**
+     * Creates a new window hook from the given Hwnd.
+     */
     __New(TargetHwnd) {
         Hwnd := (IsObject(TargetHwnd)) ? TargetHwnd.Hwnd
                                        : TargetHwnd
@@ -43,8 +83,40 @@ class Yako {
             throw TypeError("Expected an Object or Integer",, Type(Hwnd))
         }
 
-        Result := DllCall(Yako.Injector . "\inject", "Ptr", Hwnd, "Ptr",
-                          A_ScriptHwnd, "Str", Yako.WindowProc)
+        Yako.Inject(Hwnd)
+        MsgHandler := ObjBindMethod(Yako.MsgHandler, "Call", this)
+
+        PID := 0
+        DllCall("GetWindowThreadProcessId", "Ptr", Hwnd, "UInt*", &PID)
+        hProcess := DllCall("OpenProcess", "UInt", 0x10, "Int", false,
+                "UInt", PID)
+        
+        Define("MsgHandler", MsgHandler)
+        Define("Hwnd", Hwnd)
+        Define("Process", hProcess)
+        Define("Messages", CreateMap())
+        Define("Commands", CreateMap())
+        Define("Notifs", CreateMap())
+
+        OnMessage(Yako.MsgNumber, MsgHandler)
+
+        static CreateMap() {
+            M := Map()
+            M.Default := false
+            return M
+        }
+
+        Define(PropName, Value) {
+            this.DefineProp(PropName, { Get: (Instance) => Value })
+        }
+    }
+
+    static Inject(TargetHwnd) {
+        Result := DllCall(Yako.Injector . "\inject",
+            "Ptr", TargetHwnd,
+            "Ptr", A_ScriptHwnd,
+            "Str", Yako.WindowProc)
+        
         switch (Result) {
             case 1: Msg := "Unable to open process of AutoHotkey script."
             case 2: Msg := "Unable to allocate virtual memory."
@@ -55,30 +127,6 @@ class Yako {
         }
         if (Result) {
             throw OSError(Msg)
-        }
-
-        Callback := ObjBindMethod(this, "MsgHandler")
-
-        PID := 0
-        DllCall("GetWindowThreadProcessId", "Ptr", Hwnd, "UInt*", &PID)
-        hProcess := DllCall("OpenProcess", "UInt", 0x10, "Int", false,
-                "UInt", PID)
-        
-        Define("Process", hProcess)
-        Define("Messages", CreateMap())
-        Define("Commands", CreateMap())
-        Define("Notifs", CreateMap())
-
-        OnMessage(Yako.MsgNumber, Callback)
-
-        static CreateMap() {
-            M := Map()
-            M.Default := false
-            return M
-        }
-
-        Define(PropName, Value) {
-            this.DefineProp(PropName, { Get: (Instance) => Value })
         }
     }
 
@@ -112,7 +160,7 @@ class Yako {
         this.Commands[NotifyCode] := Callback
     }
 
-    MsgHandler(wParam, lParam, Msg, Hwnd) {
+    static MsgHandler(wParam, lParam, Msg, Hwnd) {
         TanukiMsg := StructFromPtr(Yako.Message, lParam)
 
         Callback := this.Messages[TanukiMsg.Msg]
@@ -137,10 +185,12 @@ class Yako {
         }
     }
 
+    Free() => this.__Delete()
+
     __Delete() {
         DllCall("CloseHandle", "Ptr", this.Process)
-        ; TODO need to free the old subclass procedure when AHK quits
-        ;      probably create `__declspec(dllexport) void free()` function
+        SendMessage(Yako.FreeMsg, Yako.FreeMsg, Yako.FreeMsg, this)
+        OnMessage(Yako.MsgNumber, this.MsgHandler, false)
     }
 
     ReadObject(StructClass, Ptr) {
@@ -175,8 +225,7 @@ class RECT {
  */
 class YakoGui extends Yako {
     /**
-     * Sent when the window is being destroyed. This message always returns
-     * calls the next subclass procedure to ensure proper cleanup.
+     * Sent when the window is being destroyed.
      * 
      * @example
      * MyGui.Destroy((this) {
@@ -254,7 +303,6 @@ class YakoGui extends Yako {
         return this
     }
 
-    ; TODO split into de/activate?
     /**
      * Sent when the window is being activated.
      * 
@@ -375,9 +423,11 @@ Notepad := YakoGui.FromWindow("ahk_exe notepad.exe")
 
 Notepad.Move((this, x, y) {
     ToolTip(x " " y)
-    return 0
+}).Destroy((this) {
+    SetTimer(() => ExitApp(), -500)
 })
 
 ^space:: {
 
 }
+
