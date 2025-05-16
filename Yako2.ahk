@@ -13,66 +13,117 @@
  * their behavior.
  */
 class Yako {
+    /**
+     * Default map of message callbacks, which is the base type for all `Yako`
+     * subtypes. Each class is set up with its own `Messages` map, a special
+     * map that supports inheritance down the chain of `Yako` classes.
+     * 
+     * @returns  {Yako.ChainedMap}
+     */
     Messages {
         get {
-            static MapObj := Yako.LinkedMap()
+            static MapObj := Yako.ChainedMap()
             return MapObj
         }
     }
 
+    /**
+     * Default, empty message handler, which is the base type for all message
+     * handlers of `Yako` subtypes.
+     * 
+     * ### How do I use this?
+     * 
+     * Inside the message handler class, static methods define how new messages
+     * should be registered. They should usually call `.OnMessage(...)`.
+     * 
+     * ```
+     * ...
+     * static Destroy(Callback) {
+     *     GetMethod(Callback)
+     *     this.OnMessage(WM_DESTROY := 0x0002, (this, wParam, lParam) {
+     *         return Callback(this)
+     *     })
+     * }
+     * ...
+     * ```
+     * 
+     * Non-static methods define the implementations which should be used by
+     * that particular class:
+     * 
+     * ```
+     * ...
+     * Destroy() {
+     *     ToolTip("quitting...")
+     *     SetTimer(() => ExitApp(), -1000)
+     * }
+     * ...
+     * ```
+     */
     class MessageHandler {
 
     }
 
+    /**
+     * Static init. In this method, we set up events defined by the
+     * `MessageHandler` class.
+     */
     static __New() {
         if (this == Yako) {
             return
         }
 
+        ; define a `Messages` map for this class, which inherits from
+        ; the base type's `Messages`
         Messages := this.Prototype.Messages.Subclass()
         this.DefineProp("Messages", { Get: (Instance) => Messages })
 
+        ; if the class defines its own message handler, make it inherit
+        ; from the base class' message handler
         if (!HasNestedClass(this, "MessageHandler")) {
             return
         }
-
         ObjSetBase(this.MessageHandler, ObjGetBase(this).MessageHandler)
 
+        ; non-static methods are seen as the callback function to use as
+        ; argument for the same-named static method
         MessageHandler := this.MessageHandler
         Callbacks := MessageHandler.Prototype
 
+        ; enuerate through all non-static methods of the class
         for PropertyName in Callbacks.OwnProps() {
-            if (PropertyName = "__Class") {
+            ; ignore special AHK properties
+            if (PropertyName = "__Class" || PropertyName = "__Init") {
                 continue
             }
 
-            ; TODO better error messages
+            ; ensure that the associated register method exists
             CallbackDesc := Callbacks.GetOwnPropDesc(PropertyName)
+            if (!ObjHasOwnProp(CallbackDesc, "Call")) {
+                throw ValueError("only methods allowed")
+            }
             if (!HasProp(MessageHandler, PropertyName)) {
                 throw UnsetError("undefined event",, "static " . PropertyName)
             }
-            if (!ObjHasOwnProp(CallbackDesc, "Call")) {
-                throw ValueError("only methods allowed")
-            }
 
-            ; TODO loop through base chain instead of %%-ing?
+            ; NOTE we've already established through `HasProp` that the
+            ;      property exists somewhere
             while (!ObjHasOwnProp(MessageHandler, PropertyName)) {
                 MessageHandler := ObjGetBase(MessageHandler)
             }
-
             HandlerDesc := MessageHandler.GetOwnPropDesc(PropertyName)
-
             if (!ObjHasOwnProp(CallbackDesc, "Call")) {
                 throw ValueError("only methods allowed")
             }
 
+            ; register the new message callback
             Callback := CallbackDesc.Call
-            Handler := HandlerDesc.Call
-            Handler(this.Prototype, Callback)
+            RegisterFunc := HandlerDesc.Call
+            RegisterFunc(this.Prototype, Callback)
         }
 
         /**
-         * 
+         * Determines whether a class directly owns a nested class with the
+         * given name.
          */
         static HasNestedClass(Cls, Name) {
             if (!ObjHasOwnProp(Cls, Name)) {
@@ -94,10 +145,9 @@ class Yako {
      * A special map structure supporting inheritance from other maps
      * similar to a linked list.
      */
-    class LinkedMap extends Map {
+    class ChainedMap extends Map {
         /**
-         * Returns a new MessageHandler map with the given base map to
-         * inherit from.
+         * Returns a new chained map with the given base map to inherit from.
          */
         __New(Next := Map()) {
             this.Default := false
@@ -134,7 +184,7 @@ class Yako {
         }
 
         /**
-         * Returns a value from the MessageHandler map.
+         * Returns a value from the chained map.
          */
         Get(Key, Default?) {
             return super.Get(Key, Default?) || this.Next.Get(Key, Default?)
@@ -150,13 +200,16 @@ class Yako {
         }
 
         /**
-         * Returns a new MessageHandler with `this` as its base.
+         * Returns a new `ChainedMap` that inherits from this chained map.
          */
         Subclass() {
-            return Yako.LinkedMap(this)
+            return Yako.ChainedMap(this)
         }
     }
 
+    /**
+     * Defines register functions associated for GUIs
+     */
     class Gui extends Yako {
         class MessageHandler {
             static Destroy(Callback) {
@@ -178,25 +231,39 @@ class Yako {
         }
     }
 
+    /**
+     * Returns a new instance from the given Control parameters.
+     */
     static FromControl(Ctl, WTtl?, WTxt?, ETtl?, ETxt?) {
         Hwnd := ControlGetHwnd(Ctl, WTtl?, WTxt?, ETtl?, ETxt?)
         return this(Hwnd)
     }
 
+    /**
+     * Returns a new instance from the given WinTitle parameters.
+     */
     static FromWindow(WTtl?, WTxt?, ETtl?, ETxt?) {
         Hwnd := WinGetId(WTtl?, WTxt?, ETtl?, ETxt?)
         return this(Hwnd)
     }
 
+    /**
+     * Returns a new instance from the given Hwnd.
+     */
     static FromHwnd(Hwnd) {
         return this(Hwnd)
     }
 
+    /**
+     * Returns a new instance from the given Hwnd.
+     */
     __New(TargetHwnd) {
         static PROCESS_VM_READ := 0x10
+
+        ; map of all actively subclassed windows
         static Instances := Map()
         static OnExitCallback := OnExit((*) {
-            for Instance in Instances {
+            for Instance, _ in Instances {
                 Instance.__Delete()
             }
         })
@@ -231,16 +298,22 @@ class Yako {
             YakoMsg.Handled := true
         }
 
-        this.DefineProp("__Delete", { Call: () {
-            DllCall("CloseHandle", "Ptr", PID)
-            SendMessage(0x4CCC, 0x4CCC, 0x4CCC, this)
+        Instances.Set(this, true)
+
+        this.DefineProp("__Delete", { Call: (Instance) {
+            DllCall("CloseHandle", "Ptr", Instance.PID)
+            try SendMessage(0x4CCC, 0x4CCC, 0x4CCC, Instance)
             OnMessage(0x3CCC, OnMessageCallback, false)
+            Instances.Delete(Instance)
         } })
 
         ; register the callback function and then finally, subclass the window
         OnMessage(0x3CCC, OnMessageCallback)
         Inject(Hwnd)
 
+        /**
+         * Overrides the subclass procedure of a window by the given Hwnd.
+         */
         static Inject(Hwnd) {
             static Injector   := A_LineFile . "\..\injector.dll\inject"
             static WindowProc := A_LineFile . "\..\windowProc.dll"
@@ -262,8 +335,16 @@ class Yako {
         }
     }
 
+    /**
+     * Used as return value to pass the message to the next window procedure
+     * instead of consuming it.
+     */
     DoDefault => Yako.DoDefault
 
+    /**
+     * An object that signals that the message should be deferred to the next
+     * window procedure instead of being consumed.
+     */
     static DoDefault {
         get {
             static _ := Object()
@@ -271,8 +352,14 @@ class Yako {
         }
     }
 
+    /**
+     * Removes the overridden window procedure and frees associated memory.
+     */
     Free() => this.__Delete()
 
+    /**
+     * Reads an object from the window.
+     */
     ReadObject(StructClass, Ptr) {
         Output := StructClass()
         OutSize := ObjGetDataSize(Output)
@@ -282,6 +369,13 @@ class Yako {
                 "Ptr", OutPtr, "UPtr", OutSize, "Ptr", 0)
     }
 
+    /**
+     * Registers a function to be called when the window triggers the given
+     * message number.
+     * 
+     * @param   {Integer}  MsgNumber  message number to monitor
+     * @param   {Func}     Callback   the function to be called
+     */
     OnMessage(MsgNumber, Callback) {
         if (!IsInteger(MsgNumber)) {
             throw TypeError("Expected an Integer",, Type(MsgNumber))
@@ -292,24 +386,31 @@ class Yako {
         this.Messages.Set(MsgNumber, Callback)
     }
 
+    /**
+     * Struct that is sent from the external application to the AHK script.
+     */
     class Message {
-        Msg     : u32
-        wParam  : uPtr
-        lParam  : uPtr
-        result  : uPtr
-        handled : i32
+        Msg     : u32   ; message ID
+        wParam  : uPtr  ; wParam of the message
+        lParam  : uPtr  ; lParam of the message
+        result  : uPtr  ; if handled, this member acts as return value
+        handled : i32   ; whether to consume the event instead of delegating it
     }
 }
 
 class Notepad extends Yako.Gui {
     class MessageHandler {
-        Destroy() {
-            SetTimer(() => ExitApp(), -2000)
+        Move(x, y) {
+            static WasMoved := false
+            if (!WasMoved) {
+                WasMoved := true
+                ToolTip("quitting...")
+                SetTimer(() => this.Free(), -2000)
+            }
         }
 
-        Move(x, y) {
-            ToolTip(x " " y)
-            return this.DoDefault
+        Destroy() {
+            MsgBox("destroyed!")
         }
     }
 
