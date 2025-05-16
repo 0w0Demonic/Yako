@@ -1,4 +1,5 @@
 #Requires AutoHotkey >=v2.1-alpha.9
+#Include <AquaHotkeyX>
 /**
  * ```
  *  ,-.    ,_~*, /
@@ -419,10 +420,34 @@ class Notepad extends Yako.Gui {
     }
 }
 
-NotepadObj := Notepad.FromWindow("ahk_exe notepad.exe")
+; NotepadObj := Notepad.FromWindow("ahk_exe notepad.exe")
 
-space:: {
-
+esc:: {
+    ExitApp()
 }
 
+class Tenko extends AquaHotkey {
+    static __New() {
+        if (this != Tenko || !IsSet(Yako) || !(Yako is Class)) {
+            return
+        }
+        Cls := Class()
+        Cls.Prototype := Object()
+        Cls.Prototype.__Class := "<Internal>"
 
+        Clone := this.Clone()
+
+        this.DefineProp("Yako", {
+            Get: (Instance) => Clone,
+            Call: (Instance, Args*) => Clone(Instance, Args*)
+        })
+
+        (AquaHotkey.__New)(Cls)
+    }
+
+    class Gui {
+        static SpecialProperty() {
+
+        }
+    }
+}
