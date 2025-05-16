@@ -161,6 +161,9 @@ class Yako {
     }
 
     static MsgHandler(wParam, lParam, Msg, Hwnd) {
+        if (wParam != this.Hwnd) {
+            return
+        }
         TanukiMsg := StructFromPtr(Yako.Message, lParam)
 
         Callback := this.Messages[TanukiMsg.Msg]
