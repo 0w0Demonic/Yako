@@ -615,26 +615,69 @@ class RECT {
     Bottom : u32
 }
 
+class ModifierKeys {
+    Value : u16
+
+    __New(Value) {
+        this.Value := Value
+    }
+
+    LButton  => 0x0001
+    RButton  => 0x0002
+    Shift    => 0x0004
+    Control  => 0x0008
+    MButton  => 0x0010
+    XButton1 => 0x0020
+    XButton2 => 0x0040
+
+    static LButton  => !!(this.Value & 0x0001)
+    static RButton  => !!(this.Value & 0x0002)
+    static Shift    => !!(this.Value & 0x0004)
+    static Control  => !!(this.Value & 0x0008)
+    static MButton  => !!(this.Value & 0x0010)
+    static XButton1 => !!(this.Value & 0x0020)
+    static XButton2 => !!(this.Value & 0x0040)
+}
+
 class Notepad extends Yako.Gui {
     class MessageHandler {
-        Destroy() {
-            ToolTip("quitting...")
-            SetTimer(() => ExitApp(), -3000)
-        }
+        ;Destroy() {
+        ;    ToolTip("quitting...")
+        ;    SetTimer(() => ExitApp(), -3000)
+        ;}
 
         EnterSizeMove() {
             ToolTip("Entering size/move loop...")
         }
-    }
 
-    class Edit extends Yako.Gui {
-        class MessageHandler {
-            ContextMenu(x, y, wParam) {
-                ToolTip(x " " y " " wParam)
+        ;Close() {
+        ;    Result := MsgBox("Are you sure you want to quit?", "Notepad", 0x0001)
+        ;    return (Result = "OK") ? this.DoDefault : 0
+        ;}
+
+        QueryOpen() {
+            return Random(true, false)
+        }
+
+        ;Quit(ExitCode) {
+        ;    MsgBox(ExitCode)
+        ;}
+
+        ;ActivateApp(IsActivated, ThreadId) {
+        ;    ToolTip(IsActivated " " ThreadId)
+        ;    return 0
+        ;}
+
+        SetCursor(HitTest, MsgNumber, Hwnd) {
+            if (HitTest == 2) {
+                ToolTip("hovering over caption...")
+            } else {
+                ToolTip("not hovering over caption.")
             }
         }
     }
 }
 
-NotepadHook := Notepad.FromWindow("ahk_exe notepad.exe")
-
+ToolTip("waiting for Notepad to open...")
+SetTimer(() => ToolTip(), -2000)
+Notepad.WinWait(&Hook, unset, "ahk_exe notepad.exe")
