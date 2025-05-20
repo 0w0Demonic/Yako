@@ -128,14 +128,15 @@
  * 
  * 4. **Create a Subclass Hook**:
  * 
- * To start intercepting message, you need to **instantiate your class**
+ * To start intercepting messages, you need to **instantiate your class**
  * with a target window:
  * 
  * ```
  * NotepadHook := Notepad.FromWindow("ahk_exe notepad.exe")
  * ```
  * 
- * This hooks Notepad's main window and starts routing messages to your class.
+ * This hooks Notepad's main window and starts rerouting messages to
+ * your AutoHotkey script.
  * 
  * ---
  * 
@@ -177,9 +178,9 @@
  * ### `.Free()`
  * 
  * Call `.Free()` to unhook the custom window procedure and **release all
- * allocated memory** related to the injection. Yako already cleans up
- * when your script exits, but it's there if you want to explicitly shut it
- * down to e.g. subclass a different window.
+ * allocated memory** related to the injection. Although Yako already
+ * cleans up when your script exits, you can use this function to explicitly
+ * unhook the window.
  * 
  * ```
  * Notepad.Free() ; stop listening to Notepad's window messages
@@ -252,7 +253,7 @@ class Yako {
         ; define a `Messages` map for this class, which inherits from
         ; the base type's `Messages`
         Messages := this.Prototype.Messages.Subclass()
-        this.DefineProp("Messages", { Get: (Instance) => Messages })
+        this.Prototype.DefineProp("Messages", { Get: (Instance) => Messages })
 
         ; if the class defines its own message handler, make it inherit
         ; from the base class' message handler
@@ -580,6 +581,10 @@ esc:: {
 
 class Tenko extends AquaHotkey {
     static __New() {
+        if (true) {
+            return
+        }
+
         super.__New()
         if (!IsSet(Yako) || !(Yako is Class)) {
             return
@@ -601,30 +606,7 @@ class Tenko extends AquaHotkey {
         ObjSetBase(Cls, AquaHotkey)
         Cls.__New()
     }
-
-    class Gui {
-        static SpecialProperty() {
-
-        }
-    }
 }
-
-class Notepad extends Yako.Gui {
-    class MessageHandler {
-        Destroy() {
-            this.Free()
-            SetTimer(() {
-                Notepad.WinWait(&NotepadHook, unset, "ahk_exe notepad.exe")
-            }, -400)
-        }
-
-        Sizing(Bounds, Edge) {
-            ToolTip(Bounds.Left " " Bounds.Top " " Bounds.Right " " Bounds.Bottom)
-        }
-    }
-}
-
-Notepad.WinWait(&NotepadHook, unset, "ahk_exe notepad.exe")
 
 class RECT {
     Left   : u32
@@ -632,4 +614,27 @@ class RECT {
     Right  : u32
     Bottom : u32
 }
+
+class Notepad extends Yako.Gui {
+    class MessageHandler {
+        Destroy() {
+            ToolTip("quitting...")
+            SetTimer(() => ExitApp(), -3000)
+        }
+
+        EnterSizeMove() {
+            ToolTip("Entering size/move loop...")
+        }
+    }
+
+    class Edit extends Yako.Gui {
+        class MessageHandler {
+            ContextMenu(x, y, wParam) {
+                ToolTip(x " " y " " wParam)
+            }
+        }
+    }
+}
+
+NotepadHook := Notepad.FromWindow("ahk_exe notepad.exe")
 

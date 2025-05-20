@@ -139,6 +139,38 @@ class MessageHandler {
     }
 
     /**
+     * Sent when the window is enabled or disabled.
+     * 
+     * - WasEnabled: enabled status of the window
+     * 
+     * - return value: `0` or `DoDefault`
+     * 
+     * @example
+     * Enable(WasEnabled) {
+     *     ToolTip(WasEnabled ? "enabled..."
+     *                        : "disabled...")
+     * }
+     */
+    static Enable(Callback) {
+        GetMethod(Callback)
+        this.OnMessage(WM_ENABLE := 0x000A, (GuiObj, wParam, lParam) {
+            return Callback(GuiObj, wParam)
+        })
+    }
+
+    /**
+     * TODO
+     */
+    static ContextMenu(Callback) {
+        GetMethod(Callback)
+        this.OnMessage(WM_CONTEXTMENU := 0x007B, (GuiObj, wParam, lParam) {
+            x := lParam & 0xFFFF
+            y := (lParam >>> 16) & 0xFFFF
+            return Callback(GuiObj, wParam, x, y)
+        })
+    }
+
+    /**
      * Sent to the window that the user is resizing.
      * TODO docs
      * 
@@ -159,6 +191,27 @@ class MessageHandler {
         GetMethod(Callback)
         this.OnMessage(WM_SIZING := 0x0214, (GuiObj, wParam, lParam) {
             return Callback(GuiObj, GuiObj.ReadObject(RECT, lParam), wParam)
+        })
+    }
+
+    static Moving(Callback) {
+        GetMethod(Callback)
+        this.OnMessage(WM_MOVING := 0x216, (GuiObj, wParam, lParam) {
+            return Callback(GuiObj, GuiObj.ReadObject(RECT, lParam))
+        })
+    }
+
+    static EnterSizeMove(Callback) {
+        GetMethod(Callback)
+        this.OnMessage(WM_ENTERSIZEMOVE := 0x0231, (GuiObj, wParam, lParam) {
+            return Callback(GuiObj)
+        })
+    }
+
+    static ExitSizeMove(Callback) {
+        GetMethod(Callback)
+        this.OnMessage(WM_EXITSIZEMOVE := 0x0232, (GuiObj, wParam, lParam) {
+            return Callback(GuiObj)
         })
     }
 } ; class MessageHandler
