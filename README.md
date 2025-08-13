@@ -68,7 +68,9 @@ They accept a single parameter which is the callback function that should
 be registered. Use `this.OnMessage(MsgNumber, Callback)` to register the new
 callback.
 
+```ahk
 this.OnMessage(WM_NCDESTROY := 0x0082, Callback)
+```
 
 By default, a callback function accepts the relevant object (`this`), as
 well as the wParam and lParam of the incoming message (see below).
